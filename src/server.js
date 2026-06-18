@@ -60,6 +60,7 @@ app.use('/api/relatorios',  require('./routes/relatorios'));
 app.use('/api/pagamentos',  require('./routes/pagamentos'));
 app.use('/api/dashboard',   require('./routes/dashboard'));
 app.use('/api/crediario',   require('./routes/crediario'));
+app.use('/api/caixa',       require('./routes/caixa'));
 
 // ── Health check ──────────────────────────────────────────────
 app.get('/health', (req, res) => res.json({ status: 'ok', ts: new Date().toISOString() }));
