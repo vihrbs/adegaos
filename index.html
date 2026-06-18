@@ -354,6 +354,7 @@ select.sel:focus { border-color: var(--accent); }
       <button class="nav-item" onclick="irPara('fornecedores')"><span class="ni">🏭</span> Fornecedores</button>
       <button class="nav-item" onclick="irPara('vendedores')"><span class="ni">🤝</span> Vendedores</button>
       <button class="nav-item" onclick="irPara('relatorios')"><span class="ni">📈</span> Relatórios</button>
+      <button class="nav-item" onclick="irPara('crediario')"><span class="ni">📒</span> Crediário</button>
       <button class="nav-item" onclick="irPara('configuracoes')"><span class="ni">⚙️</span> Configurações</button>
     </nav>
     <div class="sidebar-footer">
@@ -598,6 +599,7 @@ const MODULOS = {
   fornecedores:   { titulo: 'Fornecedores',    render: renderFornecedores },
   vendedores:     { titulo: 'Vendedores',      render: renderVendedores },
   relatorios:     { titulo: 'Relatórios',      render: renderRelatorios },
+  crediario:      { titulo: 'Crediário',         render: renderCrediario },
   configuracoes:  { titulo: 'Configurações',   render: renderConfiguracoes }
 };
 
@@ -2037,6 +2039,254 @@ async function abrirCheckout() {
     if (!res || !res.url) { toast('Erro ao abrir checkout', 'err'); return; }
     window.open(res.url, '_blank');
   } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// CREDIÁRIO
+// ═══════════════════════════════════════════════════════════
+async function renderCrediario() {
+  $('topbar-actions').innerHTML = `<button class="btn btn-acento" onclick="modalNovoCrediario()">+ Crediário</button>`;
+  try {
+    const [lista, resumo] = await Promise.all([
+      api('GET', '/api/crediario?status=aberto'),
+      api('GET', '/api/crediario/resumo')
+    ]);
+    if (!lista) return;
+
+    $('content').innerHTML = `
+      <div class="kpi-grid" style="margin-bottom:20px">
+        <div class="kpi red">
+          <div class="kpi-label">Total em Aberto</div>
+          <div class="kpi-val">${fmtBRL(resumo?.total_em_aberto||0)}</div>
+          <div class="kpi-sub">${resumo?.qtd_crediarios||0} crediários ativos</div>
+        </div>
+        <div class="kpi accent">
+          <div class="kpi-label">Total a Receber</div>
+          <div class="kpi-val">${fmtBRL(resumo?.total_a_receber||0)}</div>
+        </div>
+        <div class="kpi green">
+          <div class="kpi-label">Já Recebido</div>
+          <div class="kpi-val">${fmtBRL(resumo?.total_recebido||0)}</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr>
+              <th>Cliente</th><th>Descrição</th><th>Total</th><th>Pago</th><th>Restante</th><th>Parcelas</th><th>Status</th><th></th>
+            </tr></thead>
+            <tbody>
+              ${(lista||[]).map(c => {
+                const pct = c.valor_total > 0 ? Math.round((c.valor_pago / c.valor_total) * 100) : 0;
+                return `
+                  <tr>
+                    <td style="font-weight:500">${esc(c.clientes?.nome||'—')}<br><small style="color:var(--text2)">${esc(c.clientes?.telefone||'')}</small></td>
+                    <td>${esc(c.descricao||'—')}</td>
+                    <td style="font-weight:600">${fmtBRL(c.valor_total)}</td>
+                    <td style="color:var(--green)">${fmtBRL(c.valor_pago)}</td>
+                    <td style="color:var(--red);font-weight:600">${fmtBRL(c.valor_restante)}</td>
+                    <td>
+                      <div style="font-size:11px;color:var(--text2);margin-bottom:3px">${pct}% pago</div>
+                      <div class="est-bar"><div class="est-bar-fill normal" style="width:${pct}%;background:var(--green)"></div></div>
+                    </td>
+                    <td><span class="badge ${c.status==='pago'?'badge-green':c.status==='cancelado'?'badge-red':'badge-yellow'}">${c.status==='pago'?'Quitado':c.status==='cancelado'?'Cancelado':'Aberto'}</span></td>
+                    <td style="display:flex;gap:4px">
+                      <button class="btn btn-verde btn-sm" onclick="modalPagarCrediario('${c.id}','${esc(c.clientes?.nome||'')}',${c.valor_restante})">💰 Pagar</button>
+                      <button class="btn btn-ghost btn-sm" onclick="modalDetalheCrediario('${c.id}')">👁</button>
+                    </td>
+                  </tr>
+                `;
+              }).join('') || '<tr><td colspan="8" class="empty">Nenhum crediário em aberto</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card mt16">
+        <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--text2)">Crediários Quitados</div>
+        <div id="crediarios-pagos"><div class="loading">Carregando…</div></div>
+      </div>
+    `;
+
+    // Carrega quitados
+    const pagos = await api('GET', '/api/crediario?status=pago');
+    const el = $('crediarios-pagos');
+    if (el) {
+      el.innerHTML = (pagos||[]).length === 0
+        ? '<div class="empty">Nenhum crediário quitado ainda</div>'
+        : (pagos||[]).slice(0,10).map(c=>`
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
+            <span>${esc(c.clientes?.nome||'—')}</span>
+            <span style="color:var(--text2);font-size:12px">${fmtData(c.atualizado_em)}</span>
+            <span style="color:var(--green);font-weight:600">${fmtBRL(c.valor_total)}</span>
+            <span class="badge badge-green">Quitado</span>
+          </div>
+        `).join('');
+    }
+  } catch(e) {
+    $('content').innerHTML = `<div class="empty">Erro: ${esc(e.message)}</div>`;
+  }
+}
+
+async function modalNovoCrediario() {
+  const clientes = await api('GET', '/api/clientes?limit=200');
+  if (!clientes) return;
+
+  abrirModal('Novo Crediário', `
+    <div class="fg"><label>Cliente*</label>
+      <select id="nc-cliente">
+        <option value="">Selecione o cliente…</option>
+        ${(clientes.clientes||[]).map(c=>`<option value="${c.id}">${esc(c.nome)} — ${esc(c.telefone||'')}</option>`).join('')}
+      </select>
+    </div>
+    <div class="fg mt10"><label>Descrição</label>
+      <input id="nc-desc" placeholder="Ex: Compra de bebidas, cerveja…">
+    </div>
+    <div class="frow mt10">
+      <div class="fg"><label>Valor Total (R$)*</label>
+        <input type="number" id="nc-valor" min="0" step="0.01" placeholder="0,00">
+      </div>
+      <div class="fg"><label>Número de Parcelas</label>
+        <select id="nc-parcelas">
+          <option value="1">Sem parcelamento (à vista fiado)</option>
+          <option value="2">2x</option>
+          <option value="3">3x</option>
+          <option value="4">4x</option>
+          <option value="5">5x</option>
+          <option value="6">6x</option>
+          <option value="10">10x</option>
+          <option value="12">12x</option>
+        </select>
+      </div>
+    </div>
+    <div class="fg mt10"><label>Data da 1ª Parcela</label>
+      <input type="date" id="nc-data" value="${new Date().toISOString().split('T')[0]}">
+    </div>
+    <div class="fg mt10"><label>Observações</label>
+      <textarea id="nc-obs" rows="2" placeholder="Opcional"></textarea>
+    </div>
+  `, `
+    <button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button>
+    <button class="btn btn-acento" onclick="salvarNovoCrediario()">Criar Crediário</button>
+  `);
+}
+
+async function salvarNovoCrediario() {
+  const cliente_id = $('nc-cliente').value;
+  const valor_total = Number($('nc-valor').value);
+  if (!cliente_id) { toast('Selecione o cliente', 'err'); return; }
+  if (!valor_total || valor_total <= 0) { toast('Informe o valor', 'err'); return; }
+
+  try {
+    await api('POST', '/api/crediario', {
+      cliente_id,
+      descricao:             $('nc-desc').value || null,
+      valor_total,
+      num_parcelas:          Number($('nc-parcelas').value),
+      data_primeira_parcela: $('nc-data').value,
+      observacoes:           $('nc-obs').value || null
+    });
+    toast('Crediário criado!');
+    fecharModal();
+    renderCrediario();
+  } catch(e) {
+    toast(e.message, 'err');
+  }
+}
+
+async function modalPagarCrediario(id, nomeCliente, valorRestante) {
+  abrirModal('Registrar Pagamento', `
+    <div style="background:var(--bg3);border-radius:8px;padding:12px 14px;margin-bottom:14px">
+      <div style="font-size:12px;color:var(--text2)">Cliente</div>
+      <div style="font-weight:600;font-size:15px">${esc(nomeCliente)}</div>
+      <div style="font-size:12px;color:var(--text2);margin-top:6px">Restante a pagar</div>
+      <div style="font-weight:700;font-size:20px;color:var(--red)">${fmtBRL(valorRestante)}</div>
+    </div>
+    <div class="fg"><label>Valor do Pagamento (R$)*</label>
+      <input type="number" id="pg-valor" min="0.01" step="0.01" max="${valorRestante}" placeholder="0,00" value="${valorRestante}">
+    </div>
+    <div class="fg mt10"><label>Forma de Pagamento</label>
+      <select id="pg-forma">
+        <option value="dinheiro">💵 Dinheiro</option>
+        <option value="pix">📱 PIX</option>
+        <option value="cartao_debito">💳 Débito</option>
+        <option value="cartao_credito">💳 Crédito</option>
+      </select>
+    </div>
+    <div class="fg mt10"><label>Observações</label>
+      <input id="pg-obs" placeholder="Opcional">
+    </div>
+  `, `
+    <button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button>
+    <button class="btn btn-verde" onclick="confirmarPagamentoCrediario('${id}')">💰 Confirmar Pagamento</button>
+  `);
+}
+
+async function confirmarPagamentoCrediario(id) {
+  const valor = Number($('pg-valor').value);
+  if (!valor || valor <= 0) { toast('Informe o valor', 'err'); return; }
+
+  try {
+    const res = await api('POST', '/api/crediario/' + id + '/pagar', {
+      valor,
+      forma_pagamento: $('pg-forma').value,
+      observacoes:     $('pg-obs').value || null
+    });
+    if (!res) return;
+    toast(res.mensagem || 'Pagamento registrado!');
+    fecharModal();
+    renderCrediario();
+  } catch(e) {
+    toast(e.message, 'err');
+  }
+}
+
+async function modalDetalheCrediario(id) {
+  try {
+    const c = await api('GET', '/api/crediario/' + id);
+    if (!c) return;
+
+    const pct = c.valor_total > 0 ? Math.round((c.valor_pago / c.valor_total) * 100) : 0;
+
+    abrirModal('Detalhe do Crediário', `
+      <div style="background:var(--bg3);border-radius:8px;padding:12px 14px;margin-bottom:14px">
+        <div style="font-weight:600;font-size:15px">${esc(c.clientes?.nome||'—')}</div>
+        <div style="font-size:12px;color:var(--text2)">${esc(c.descricao||'')}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:10px">
+          <div><div style="font-size:11px;color:var(--text2)">Total</div><div style="font-weight:700">${fmtBRL(c.valor_total)}</div></div>
+          <div><div style="font-size:11px;color:var(--text2)">Pago</div><div style="font-weight:700;color:var(--green)">${fmtBRL(c.valor_pago)}</div></div>
+          <div><div style="font-size:11px;color:var(--text2)">Restante</div><div style="font-weight:700;color:var(--red)">${fmtBRL(c.valor_restante)}</div></div>
+        </div>
+        <div class="est-bar mt10"><div class="est-bar-fill normal" style="width:${pct}%;background:var(--green)"></div></div>
+        <div style="font-size:11px;color:var(--text2);margin-top:4px">${pct}% pago</div>
+      </div>
+
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">Parcelas</div>
+      ${(c.parcelas||[]).map(p=>`
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)">
+          <span style="font-size:12px">Parcela ${p.numero} — vence ${fmtData(p.vencimento)}</span>
+          <span style="font-size:12px">${fmtBRL(p.valor_pago)} / ${fmtBRL(p.valor)}</span>
+          <span class="badge ${p.status==='paga'?'badge-green':p.status==='paga_parcial'?'badge-yellow':'badge-gray'}">${p.status==='paga'?'Paga':p.status==='paga_parcial'?'Parcial':'Aberta'}</span>
+        </div>
+      `).join('') || '<div class="empty">Sem parcelas</div>'}
+
+      <div style="font-size:13px;font-weight:600;margin:14px 0 8px">Histórico de Pagamentos</div>
+      ${(c.pagamentos||[]).map(p=>`
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+          <span style="font-size:12px">${fmtData(p.criado_em)} ${fmtHora(p.criado_em)}</span>
+          ${badgeForma(p.forma_pagamento)}
+          <span style="font-weight:600;color:var(--green)">${fmtBRL(p.valor)}</span>
+        </div>
+      `).join('') || '<div style="color:var(--text2);font-size:12px;padding:8px 0">Nenhum pagamento ainda</div>'}
+    `, `
+      <button class="btn btn-ghost" onclick="fecharModal()">Fechar</button>
+      ${c.status === 'aberto' ? `<button class="btn btn-verde" onclick="fecharModal();modalPagarCrediario('${c.id}','${esc(c.clientes?.nome||'')}',${c.valor_restante})">💰 Registrar Pagamento</button>` : ''}
+    `);
+  } catch(e) {
     toast(e.message, 'err');
   }
 }
