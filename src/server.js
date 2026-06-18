@@ -7,6 +7,9 @@ const rateLimit = require('express-rate-limit');
 
 const app = express();
 
+// ── Trust proxy (necessário no Railway) ──────────────────────
+app.set('trust proxy', 1);
+
 // ── Segurança e parsing ───────────────────────────────────────
 app.use(helmet());
 app.use(morgan('combined'));
