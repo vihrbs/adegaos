@@ -178,6 +178,20 @@ router.post('/', async (req, res) => {
       }
     }
 
+    // Lança no financeiro automaticamente (exceto fiado)
+    if (forma_pagamento !== 'fiado') {
+      await supabase.from('financeiro_lancamentos').insert({
+        empresa_id:      req.empresa_id,
+        usuario_id:      req.usuario_id,
+        tipo:            'receita',
+        valor:           total,
+        categoria:       'Vendas',
+        descricao:       'Venda #' + venda.id.slice(0, 8),
+        data:            new Date().toISOString().split('T')[0],
+        forma_pagamento: forma_pagamento
+      });
+    }
+
     res.status(201).json({ venda_id: venda.id, total, status: 'concluida' });
   } catch (err) {
     console.error('[VENDAS]', err);
