@@ -345,7 +345,8 @@ select.sel:focus { border-color: var(--accent); }
     <div id="trial-banner-container"></div>
     <nav>
       <button class="nav-item ativo" onclick="irPara('dashboard')"><span class="ni">📊</span> Dashboard</button>
-      <button class="nav-item" onclick="irPara('pdv')"><span class="ni">💳</span> PDV / Caixa</button>
+      <button class="nav-item" onclick="irPara('pdv')"><span class="ni">💳</span> PDV</button>
+      <button class="nav-item" onclick="irPara('caixa')"><span class="ni">🗄️</span> Caixa</button>
       <button class="nav-item" onclick="irPara('estoque')"><span class="ni">📦</span> Estoque</button>
       <button class="nav-item" onclick="irPara('clientes')"><span class="ni">👥</span> Clientes</button>
       <button class="nav-item" onclick="irPara('vendas')"><span class="ni">🧾</span> Vendas</button>
@@ -590,7 +591,8 @@ function renderizarTrialBanner() {
 // ═══════════════════════════════════════════════════════════
 const MODULOS = {
   dashboard:      { titulo: 'Dashboard',      render: renderDashboard },
-  pdv:            { titulo: 'PDV / Caixa',    render: renderPDV },
+  pdv:            { titulo: 'PDV',             render: renderPDV },
+  caixa:          { titulo: 'Caixa',           render: renderCaixa },
   estoque:        { titulo: 'Estoque',         render: renderEstoque },
   clientes:       { titulo: 'Clientes',        render: renderClientes },
   vendas:         { titulo: 'Histórico de Vendas', render: renderVendas },
@@ -642,7 +644,10 @@ $('modal-overlay').addEventListener('click', e => {
 // ═══════════════════════════════════════════════════════════
 async function renderDashboard() {
   try {
-    const d = await api('GET', '/api/dashboard');
+    const [d, cred] = await Promise.all([
+      api('GET', '/api/dashboard'),
+      api('GET', '/api/crediario/resumo')
+    ]);
     if (!d) return;
 
     $('content').innerHTML = `
@@ -671,6 +676,11 @@ async function renderDashboard() {
           <div class="kpi-label">Alertas de Estoque</div>
           <div class="kpi-val">${d.alertas_estoque}</div>
           <div class="kpi-sub">produtos abaixo do mínimo</div>
+        </div>
+        <div class="kpi red" style="cursor:pointer" onclick="irPara('crediario')">
+          <div class="kpi-label">Crediário em Aberto</div>
+          <div class="kpi-val">${fmtBRL(cred?.total_em_aberto||0)}</div>
+          <div class="kpi-sub">${cred?.qtd_crediarios||0} clientes devendo · clique para ver</div>
         </div>
       </div>
 
@@ -714,10 +724,20 @@ async function renderPDV() {
 
   $('content').innerHTML = '<div class="loading">Carregando produtos…</div>';
   try {
-    const produtos = await api('GET', '/api/produtos?ativo=true');
+    const [produtos, caixaAtual] = await Promise.all([
+      api('GET', '/api/produtos?ativo=true'),
+      api('GET', '/api/caixa/atual')
+    ]);
     if (!produtos) return;
+    window._caixaAberto = !!caixaAtual;
 
     $('content').innerHTML = `
+      ${!caixaAtual ? `
+        <div style="background:rgba(224,82,82,.1);border:1px solid rgba(224,82,82,.3);border-radius:10px;padding:10px 16px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center">
+          <span style="color:var(--red);font-size:13px">⚠️ Nenhum caixa aberto no momento</span>
+          <button class="btn btn-acento btn-sm" onclick="irPara('caixa')">Abrir Caixa</button>
+        </div>
+      ` : ''}
       <div class="pdv-layout">
         <div class="pdv-produtos">
           <div class="toolbar">
@@ -745,11 +765,32 @@ async function renderPDV() {
             <div class="cart-total"><span>Total</span><span id="pdv-total">R$ 0,00</span></div>
 
             <div style="font-size:11px;color:var(--text2);margin-bottom:6px;font-weight:600">FORMA DE PAGAMENTO</div>
+            <div style="margin-bottom:8px">
+              <select id="pdv-cliente" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px" onchange="PDV.cliente_id=this.value||null">
+                <option value="">👤 Consumidor (sem cadastro)</option>
+              </select>
+            </div>
             <div class="fp-btns">
               <div class="fp-btn sel" id="fp-dinheiro" onclick="selecionarForma('dinheiro')">💵 Dinheiro</div>
               <div class="fp-btn" id="fp-pix" onclick="selecionarForma('pix')">📱 PIX</div>
               <div class="fp-btn" id="fp-cartao_debito" onclick="selecionarForma('cartao_debito')">💳 Débito</div>
               <div class="fp-btn" id="fp-cartao_credito" onclick="selecionarForma('cartao_credito')">💳 Crédito</div>
+              <div class="fp-btn" id="fp-fiado" onclick="selecionarForma('fiado')" style="grid-column:span 2;background:rgba(224,82,82,.08);border-color:rgba(224,82,82,.3);color:var(--red)">📒 Fiado / Crediário</div>
+            </div>
+            <div id="pdv-crediario-opts" style="display:none;background:var(--bg3);border-radius:8px;padding:10px;margin-top:6px;font-size:12px">
+              <div style="color:var(--red);font-weight:600;margin-bottom:6px">⚠️ Selecione o cliente acima para registrar fiado</div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <label style="color:var(--text2)">Parcelas:</label>
+                <select id="pdv-parcelas" style="flex:1;padding:5px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;color:var(--text)">
+                  <option value="1">Sem parcelamento</option>
+                  <option value="2">2x</option>
+                  <option value="3">3x</option>
+                  <option value="4">4x</option>
+                  <option value="5">5x</option>
+                  <option value="6">6x</option>
+                  <option value="12">12x</option>
+                </select>
+              </div>
             </div>
 
             <button class="btn btn-acento" style="width:100%;padding:12px;font-size:15px;margin-top:6px" onclick="finalizarVenda()">
@@ -762,6 +803,18 @@ async function renderPDV() {
 
     // Guarda referência dos produtos para filtro
     window._pdvProdutos = produtos;
+
+    // Carrega clientes no selector
+    const clis = await api('GET', '/api/clientes?limit=300');
+    const sel = $('pdv-cliente');
+    if (sel && clis?.clientes) {
+      clis.clientes.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.nome + (c.telefone ? ' — ' + c.telefone : '');
+        sel.appendChild(opt);
+      });
+    }
   } catch (e) {
     $('content').innerHTML = `<div class="empty">Erro: ${esc(e.message)}</div>`;
   }
@@ -823,6 +876,8 @@ function selecionarForma(forma) {
   document.querySelectorAll('.fp-btn').forEach(b => b.classList.remove('sel'));
   const btn = document.getElementById('fp-' + forma);
   if (btn) btn.classList.add('sel');
+  const opts = $('pdv-crediario-opts');
+  if (opts) opts.style.display = forma === 'fiado' ? 'block' : 'none';
 }
 
 function renderizarCarrinho() {
@@ -862,6 +917,18 @@ function renderizarCarrinho() {
 async function finalizarVenda() {
   if (PDV.itens.length === 0) { toast('Adicione produtos ao carrinho', 'err'); return; }
 
+  // Validação de fiado
+  if (PDV.forma_pagamento === 'fiado' && !PDV.cliente_id) {
+    toast('Selecione o cliente para registrar no fiado', 'err');
+    return;
+  }
+
+  // Avisa se não há caixa aberto (mas não bloqueia)
+  if (PDV.forma_pagamento === 'dinheiro' && !window._caixaAberto) {
+    const confirma = confirm('Nenhum caixa está aberto. Deseja continuar mesmo assim?\n\nRecomendado: abra o caixa antes de vender em dinheiro.');
+    if (!confirma) return;
+  }
+
   const payload = {
     cliente_id:      PDV.cliente_id || null,
     vendedor_id:     PDV.vendedor_id || null,
@@ -878,7 +945,23 @@ async function finalizarVenda() {
   try {
     const res = await api('POST', '/api/vendas', payload);
     if (!res) return;
-    toast('Venda finalizada! Total: ' + fmtBRL(res.total));
+
+    // Se fiado, cria crediário automaticamente
+    if (PDV.forma_pagamento === 'fiado') {
+      const parcelas = Number($('pdv-parcelas')?.value || 1);
+      await api('POST', '/api/crediario', {
+        cliente_id:   PDV.cliente_id,
+        venda_id:     res.venda_id,
+        descricao:    'Venda PDV #' + res.venda_id.slice(0, 8),
+        valor_total:  res.total,
+        num_parcelas: parcelas,
+        data_primeira_parcela: new Date().toISOString().split('T')[0]
+      });
+      toast('Fiado registrado no crediário! Total: ' + fmtBRL(res.total));
+    } else {
+      toast('Venda finalizada! Total: ' + fmtBRL(res.total));
+    }
+
     PDV = { itens: [], forma_pagamento: 'dinheiro', cliente_id: null, vendedor_id: null };
     renderPDV();
   } catch (e) {
@@ -1160,7 +1243,7 @@ async function renderClientes() {
         <div class="tbl-wrap">
           <table>
             <thead><tr>
-              <th>Nome</th><th>Telefone</th><th>E-mail</th><th>Compras</th><th>Total Gasto</th><th>Última Compra</th><th></th>
+              <th>Nome</th><th>Telefone</th><th>E-mail</th><th>Compras</th><th>Total Gasto</th><th>Crediário</th><th>Última Compra</th><th></th>
             </tr></thead>
             <tbody>
               ${(res.clientes||[]).map(c=>`
@@ -1170,9 +1253,11 @@ async function renderClientes() {
                   <td>${esc(c.email||'—')}</td>
                   <td>${c.total_compras||0}</td>
                   <td style="color:var(--accent);font-weight:600">${fmtBRL(c.total_gasto)}</td>
+                  <td id="cred-cli-${c.id}"><span style="color:var(--text2);font-size:11px">—</span></td>
                   <td>${fmtData(c.ultima_compra)}</td>
-                  <td>
+                  <td style="display:flex;gap:4px">
                     <button class="btn btn-ghost btn-sm" onclick="modalEditarCliente('${c.id}','${esc(c.nome)}','${esc(c.telefone||'')}','${esc(c.email||'')}','${esc(c.endereco||'')}')">✏️</button>
+                    <button class="btn btn-ghost btn-sm" onclick="verCrediarioCliente('${c.id}','${esc(c.nome)}')">📒</button>
                   </td>
                 </tr>
               `).join('') || '<tr><td colspan="7" class="empty">Nenhum cliente cadastrado</td></tr>'}
@@ -1181,8 +1266,32 @@ async function renderClientes() {
         </div>
       </div>
     `;
+    // Carrega crediários em aberto por cliente (async, não bloqueia)
+    setTimeout(async () => {
+      const crediarios = await api('GET', '/api/crediario?status=aberto');
+      (crediarios || []).forEach(cr => {
+        const el = document.getElementById('cred-cli-' + cr.cliente_id);
+        if (el) {
+          el.innerHTML = '<span style="color:var(--red);font-weight:600;font-size:12px">R$ ' + fmt(cr.valor_restante) + '</span>';
+        }
+      });
+    }, 100);
   } catch (e) {
     $('content').innerHTML = `<div class="empty">Erro: ${esc(e.message)}</div>`;
+  }
+}
+
+async function verCrediarioCliente(clienteId, nomeCliente) {
+  try {
+    const lista = await api('GET', '/api/crediario?cliente_id=' + clienteId + '&status=aberto');
+    if (!lista || lista.length === 0) {
+      toast(nomeCliente + ' não tem crediário em aberto');
+      return;
+    }
+    const cr = lista[0];
+    modalPagarCrediario(cr.id, nomeCliente, cr.valor_restante);
+  } catch(e) {
+    toast(e.message, 'err');
   }
 }
 
@@ -1471,9 +1580,10 @@ async function renderFinanceiro() {
   $('topbar-actions').innerHTML = `<button class="btn btn-acento" onclick="modalNovoLancamento()">+ Lançamento</button>`;
   try {
     const agora = new Date();
-    const [resumo, lancamentos] = await Promise.all([
+    const [resumo, lancamentos, credResumo] = await Promise.all([
       api('GET', `/api/financeiro/resumo?mes=${agora.getMonth()+1}&ano=${agora.getFullYear()}`),
-      api('GET', '/api/financeiro/lancamentos?limit=50')
+      api('GET', '/api/financeiro/lancamentos?limit=50'),
+      api('GET', '/api/crediario/resumo')
     ]);
     if (!resumo) return;
 
@@ -1483,6 +1593,11 @@ async function renderFinanceiro() {
         <div class="kpi green"><div class="kpi-label">Receitas</div><div class="kpi-val">${fmtBRL(resumo.receitas)}</div></div>
         <div class="kpi red"><div class="kpi-label">Despesas</div><div class="kpi-val">${fmtBRL(resumo.despesas)}</div></div>
         <div class="kpi ${resumo.lucro >= 0 ? 'green' : 'red'}"><div class="kpi-label">Lucro</div><div class="kpi-val">${fmtBRL(resumo.lucro)}</div></div>
+        <div class="kpi red" style="cursor:pointer" onclick="irPara('crediario')">
+          <div class="kpi-label">A Receber (Crediário)</div>
+          <div class="kpi-val">${fmtBRL(credResumo?.total_em_aberto||0)}</div>
+          <div class="kpi-sub">${credResumo?.qtd_crediarios||0} em aberto · ver detalhes</div>
+        </div>
       </div>
 
       <div class="kpi-grid" style="margin-bottom:20px">
@@ -2289,6 +2404,216 @@ async function modalDetalheCrediario(id) {
   } catch(e) {
     toast(e.message, 'err');
   }
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// CAIXA
+// ═══════════════════════════════════════════════════════════
+async function renderCaixa() {
+  $('topbar-actions').innerHTML = '';
+  try {
+    const caixa = await api('GET', '/api/caixa/atual');
+
+    if (!caixa) {
+      $('content').innerHTML = `
+        <div class="card" style="max-width:480px;margin:0 auto;text-align:center;padding:40px 30px">
+          <div style="font-size:48px;margin-bottom:14px">🗄️</div>
+          <div style="font-size:16px;font-weight:600;margin-bottom:6px">Nenhum caixa aberto</div>
+          <div style="color:var(--text2);font-size:13px;margin-bottom:24px">Abra o caixa para começar a registrar vendas em dinheiro com controle de sangria e fechamento.</div>
+          <div class="fg" style="text-align:left">
+            <label>Valor de Abertura (R$)</label>
+            <input type="number" id="cx-abertura" min="0" step="0.01" value="0" placeholder="0,00">
+          </div>
+          <div class="fg mt10" style="text-align:left">
+            <label>Observações</label>
+            <input id="cx-obs-abertura" placeholder="Opcional">
+          </div>
+          <button class="btn btn-acento" style="width:100%;padding:12px;margin-top:16px;font-size:15px" onclick="abrirCaixa()">
+            🔓 Abrir Caixa
+          </button>
+        </div>
+
+        <div class="card mt16">
+          <div style="font-size:13px;font-weight:600;margin-bottom:12px">Histórico de Caixas</div>
+          <div id="caixa-historico"><div class="loading">Carregando…</div></div>
+        </div>
+      `;
+      carregarHistoricoCaixa();
+      return;
+    }
+
+    const horaAbertura = fmtHora(caixa.aberto_em) + ' — ' + fmtData(caixa.aberto_em);
+
+    $('content').innerHTML = `
+      <div class="kpi-grid">
+        <div class="kpi">
+          <div class="kpi-label">Valor de Abertura</div>
+          <div class="kpi-val">${fmtBRL(caixa.valor_abertura)}</div>
+          <div class="kpi-sub">aberto em ${horaAbertura}</div>
+        </div>
+        <div class="kpi green">
+          <div class="kpi-label">Vendas em Dinheiro</div>
+          <div class="kpi-val">${fmtBRL(caixa.vendas_dinheiro)}</div>
+          <div class="kpi-sub">${caixa.qtd_vendas_periodo} vendas no período</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Crediário Recebido (dinheiro)</div>
+          <div class="kpi-val">${fmtBRL(caixa.crediario_dinheiro)}</div>
+        </div>
+        <div class="kpi accent">
+          <div class="kpi-label">Valor Esperado em Caixa</div>
+          <div class="kpi-val">${fmtBRL(caixa.valor_esperado)}</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+        <div class="card">
+          <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--red)">🔻 Sangria (retirar dinheiro)</div>
+          <div class="fg"><label>Valor (R$)</label><input type="number" id="sg-valor" min="0.01" step="0.01" placeholder="0,00"></div>
+          <div class="fg mt10"><label>Motivo</label><input id="sg-motivo" placeholder="Ex: Pagamento fornecedor, depósito…"></div>
+          <button class="btn btn-vermelho" style="width:100%;margin-top:10px" onclick="registrarSangria()">Registrar Sangria</button>
+        </div>
+        <div class="card">
+          <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--green)">🔺 Suprimento (adicionar dinheiro)</div>
+          <div class="fg"><label>Valor (R$)</label><input type="number" id="sp-valor" min="0.01" step="0.01" placeholder="0,00"></div>
+          <div class="fg mt10"><label>Motivo</label><input id="sp-motivo" placeholder="Ex: Reforço de troco…"></div>
+          <button class="btn btn-verde" style="width:100%;margin-top:10px" onclick="registrarSuprimento()">Registrar Suprimento</button>
+        </div>
+      </div>
+
+      <div class="card mt16" style="margin-bottom:16px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:12px">Movimentações deste Caixa</div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>Data/Hora</th><th>Tipo</th><th>Motivo</th><th>Valor</th></tr></thead>
+            <tbody>
+              ${(caixa.movimentacoes||[]).map(m=>`
+                <tr>
+                  <td>${fmtData(m.criado_em)} ${fmtHora(m.criado_em)}</td>
+                  <td><span class="badge ${m.tipo==='sangria'?'badge-red':'badge-green'}">${m.tipo==='sangria'?'Sangria':'Suprimento'}</span></td>
+                  <td>${esc(m.motivo||'—')}</td>
+                  <td style="font-weight:600;color:${m.tipo==='sangria'?'var(--red)':'var(--green)'}">${m.tipo==='sangria'?'-':'+'} ${fmtBRL(m.valor)}</td>
+                </tr>
+              `).join('') || '<tr><td colspan="4" class="empty">Nenhuma movimentação ainda</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card" style="border-color:var(--accent)">
+        <div style="font-size:14px;font-weight:600;margin-bottom:12px">🔒 Fechar Caixa</div>
+        <div style="background:var(--bg3);border-radius:8px;padding:12px 14px;margin-bottom:14px">
+          <div style="font-size:12px;color:var(--text2)">Valor esperado em caixa (calculado pelo sistema)</div>
+          <div style="font-size:22px;font-weight:700;color:var(--accent)">${fmtBRL(caixa.valor_esperado)}</div>
+        </div>
+        <div class="fg"><label>Valor Real Contado (R$)*</label>
+          <input type="number" id="cx-fechamento" min="0" step="0.01" placeholder="Conte o dinheiro físico e informe aqui">
+        </div>
+        <div class="fg mt10"><label>Observações</label>
+          <input id="cx-obs-fechamento" placeholder="Opcional">
+        </div>
+        <button class="btn btn-vermelho" style="width:100%;padding:12px;margin-top:14px;font-size:15px" onclick="fecharCaixa()">
+          🔒 Fechar Caixa
+        </button>
+      </div>
+    `;
+  } catch (e) {
+    $('content').innerHTML = `<div class="empty">Erro: ${esc(e.message)}</div>`;
+  }
+}
+
+async function abrirCaixa() {
+  const valor = Number($('cx-abertura').value) || 0;
+  try {
+    await api('POST', '/api/caixa/abrir', {
+      valor_abertura: valor,
+      observacoes: $('cx-obs-abertura').value || null
+    });
+    toast('Caixa aberto!');
+    window._caixaAberto = true;
+    renderCaixa();
+  } catch(e) {
+    toast(e.message, 'err');
+  }
+}
+
+async function registrarSangria() {
+  const valor = Number($('sg-valor').value);
+  if (!valor || valor <= 0) { toast('Informe o valor', 'err'); return; }
+  try {
+    await api('POST', '/api/caixa/movimentacao', {
+      tipo: 'sangria',
+      valor,
+      motivo: $('sg-motivo').value || null
+    });
+    toast('Sangria registrada!');
+    renderCaixa();
+  } catch(e) {
+    toast(e.message, 'err');
+  }
+}
+
+async function registrarSuprimento() {
+  const valor = Number($('sp-valor').value);
+  if (!valor || valor <= 0) { toast('Informe o valor', 'err'); return; }
+  try {
+    await api('POST', '/api/caixa/movimentacao', {
+      tipo: 'suprimento',
+      valor,
+      motivo: $('sp-motivo').value || null
+    });
+    toast('Suprimento registrado!');
+    renderCaixa();
+  } catch(e) {
+    toast(e.message, 'err');
+  }
+}
+
+async function fecharCaixa() {
+  const valor = $('cx-fechamento').value;
+  if (valor === '' || valor === null) { toast('Informe o valor contado', 'err'); return; }
+
+  if (!confirm('Confirma o fechamento do caixa? Esta ação não pode ser desfeita.')) return;
+
+  try {
+    const res = await api('POST', '/api/caixa/fechar', {
+      valor_fechamento_informado: Number(valor),
+      observacoes: $('cx-obs-fechamento').value || null
+    });
+    if (!res) return;
+    window._caixaAberto = false;
+    toast(res.mensagem, Math.abs(res.diferenca) < 0.01 ? 'ok' : 'err');
+    renderCaixa();
+  } catch(e) {
+    toast(e.message, 'err');
+  }
+}
+
+async function carregarHistoricoCaixa() {
+  const historico = await api('GET', '/api/caixa/historico?limit=15');
+  const el = $('caixa-historico');
+  if (!el) return;
+
+  el.innerHTML = (historico||[]).length === 0
+    ? '<div class="empty">Nenhum fechamento de caixa ainda</div>'
+    : `<div class="tbl-wrap"><table>
+        <thead><tr><th>Aberto em</th><th>Fechado em</th><th>Abertura</th><th>Esperado</th><th>Informado</th><th>Diferença</th></tr></thead>
+        <tbody>
+          ${historico.map(c=>`
+            <tr>
+              <td>${fmtData(c.aberto_em)} ${fmtHora(c.aberto_em)}</td>
+              <td>${fmtData(c.fechado_em)} ${fmtHora(c.fechado_em)}</td>
+              <td>${fmtBRL(c.valor_abertura)}</td>
+              <td>${fmtBRL(c.valor_fechamento_calculado)}</td>
+              <td>${fmtBRL(c.valor_fechamento_informado)}</td>
+              <td style="font-weight:600;color:${Math.abs(c.diferenca)<0.01?'var(--green)':c.diferenca>0?'var(--blue)':'var(--red)'}">
+                ${c.diferenca > 0 ? '+' : ''}${fmtBRL(c.diferenca)}
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table></div>`;
 }
 
 // ═══════════════════════════════════════════════════════════
