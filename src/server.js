@@ -33,17 +33,18 @@ app.use(cors({
 }));
 
 // ── Rate limiting ─────────────────────────────────────────────
-const limiterGeral = rateLimit({ windowMs: 15 * 60 * 1000, max: 500 });
-const limiterAuth  = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: { erro: 'Muitas tentativas. Tente em 15 minutos.' } });
+const limiterGeral = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 500,
+  validate: { xForwardedForHeader: false }
+});
 app.use('/api/', limiterGeral);
-app.use('/api/auth/', limiterAuth);
 
 // ── Webhook MP sem JSON middleware (raw body necessário) ───────
 const { webhookMP } = require('./routes/pagamentos');
 app.post('/api/pagamentos/webhook', express.raw({ type: 'application/json' }), webhookMP);
 
 // ── Rotas da API ──────────────────────────────────────────────
-// ORDEM IMPORTA: específicas antes de genéricas, 404 no final
 app.use('/api/auth',        require('./routes/auth'));
 app.use('/api/produtos',    require('./routes/produtos'));
 app.use('/api/categorias',  require('./routes/categorias'));
