@@ -30,10 +30,14 @@ async function notificarTelegram(mensagem) {
 // POST /api/auth/registro
 router.post('/registro', async (req, res) => {
   try {
-    const { nome_empresa, nome_responsavel, email, senha, telefone } = req.body;
+    const { nome_empresa, nome_responsavel, email, senha, telefone, celular } = req.body;
+    const telefoneFinal = celular || telefone || null;
 
     if (!nome_empresa || !email || !senha) {
       return res.status(400).json({ erro: 'nome_empresa, email e senha são obrigatórios' });
+    }
+    if (!telefoneFinal) {
+      return res.status(400).json({ erro: 'celular é obrigatório' });
     }
     if (senha.length < 6) {
       return res.status(400).json({ erro: 'Senha deve ter pelo menos 6 caracteres' });
@@ -57,7 +61,7 @@ router.post('/registro', async (req, res) => {
       .from('empresas')
       .insert({
         nome: nome_empresa.trim(),
-        telefone: telefone || null,
+        telefone: telefoneFinal,
         plano_ativo: false,
         trial_expira_em: trial_expira_em.toISOString()
       })
