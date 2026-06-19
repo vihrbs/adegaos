@@ -265,6 +265,83 @@ select.sel:focus { border-color: var(--accent); }
 .spacer { flex: 1; }
 .empty { text-align: center; padding: 40px 20px; color: var(--text2); font-size: 13px; }
 .loading { text-align: center; padding: 30px; color: var(--text2); }
+
+/* ===========================================
+   RESPONSIVO - MOBILE
+=========================================== */
+.menu-btn { display: none; background: none; border: none; color: var(--text); font-size: 22px; padding: 4px 8px; line-height: 1; cursor: pointer; }
+.sidebar-close-btn { display: none; }
+.sidebar-overlay { display: none; }
+
+@media (max-width: 880px) {
+  html, body { font-size: 15px; }
+
+  #app.visivel { display: flex; }
+  .main { width: 100%; min-width: 0; }
+
+  .sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; z-index: 200;
+    width: 260px; min-width: 260px;
+    transform: translateX(-100%);
+    transition: transform .25s ease;
+    box-shadow: 8px 0 30px rgba(0,0,0,.5);
+  }
+  .sidebar.aberta { transform: translateX(0); }
+
+  .sidebar-overlay {
+    display: block; position: fixed; inset: 0; background: rgba(0,0,0,.55);
+    z-index: 199; opacity: 0; pointer-events: none; transition: opacity .25s ease;
+  }
+  .sidebar-overlay.visivel { opacity: 1; pointer-events: auto; }
+
+  .sidebar-logo { position: relative; padding-right: 44px; }
+  .sidebar-close-btn {
+    display: block; position: absolute; top: 14px; right: 12px;
+    background: none; border: none; color: var(--text2); font-size: 26px; line-height: 1; padding: 4px 8px;
+  }
+
+  .menu-btn { display: block; }
+
+  .topbar { padding: 0 14px; height: 54px; min-height: 54px; }
+  .topbar h3 { font-size: 15px; }
+  .topbar-actions { gap: 6px; }
+  .topbar-actions .btn { padding: 7px 10px; font-size: 12px; }
+
+  .content { padding: 14px; }
+
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .kpi { padding: 12px 14px; }
+  .kpi-val { font-size: 20px; }
+
+  .tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table { min-width: 560px; }
+  th, td { padding: 8px 10px; font-size: 12.5px; }
+
+  .toolbar { flex-direction: column; align-items: stretch; }
+  .input-busca, select.sel { width: 100%; min-width: 0; }
+
+  div[style*="grid-template-columns:1fr 1fr"],
+  div[style*="grid-template-columns: 1fr 1fr"] { grid-template-columns: 1fr !important; }
+
+  .pdv-layout { grid-template-columns: 1fr; height: auto; }
+  .pdv-grid { grid-template-columns: repeat(3, 1fr); max-height: 360px; }
+  .pdv-cart { order: -1; max-height: 70vh; }
+  .pdv-cart-items { max-height: 220px; }
+
+  .kanban { grid-auto-flow: column; grid-template-columns: repeat(5, 220px); overflow-x: auto; padding-bottom: 8px; }
+
+  .modal-overlay { padding: 0; align-items: flex-end; }
+  .modal { max-width: 100%; width: 100%; border-radius: 16px 16px 0 0; max-height: 92vh; }
+  .frow { grid-template-columns: 1fr; }
+
+  .login-box { width: 100%; max-width: 360px; padding: 32px 24px; }
+}
+
+@media (max-width: 480px) {
+  .kpi-grid { grid-template-columns: 1fr; }
+  .pdv-grid { grid-template-columns: repeat(2, 1fr); }
+  table { min-width: 480px; }
+}
 </style>
 </head>
 <body>
@@ -306,6 +383,10 @@ select.sel:focus { border-color: var(--accent); }
         <input type="text" id="rg-nome" placeholder="João Silva">
       </div>
       <div class="form-group">
+        <label>Celular / WhatsApp</label>
+        <input type="tel" id="rg-celular" placeholder="(11) 99999-9999" maxlength="15">
+      </div>
+      <div class="form-group">
         <label>E-mail</label>
         <input type="email" id="rg-email" placeholder="seu@email.com">
       </div>
@@ -332,11 +413,15 @@ select.sel:focus { border-color: var(--accent); }
 
 <!-- ════════ APP PRINCIPAL ════════ -->
 <div id="app">
+  <!-- Overlay para fechar sidebar no mobile -->
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleSidebar(false)"></div>
+
   <!-- Sidebar -->
-  <aside class="sidebar">
+  <aside class="sidebar" id="sidebar">
     <div class="sidebar-logo">
       <h2>🍷 BebidaOS</h2>
       <span>Gestão de Bebidas</span>
+      <button class="sidebar-close-btn" onclick="toggleSidebar(false)">×</button>
     </div>
     <div class="sidebar-empresa">
       <p>Logado como</p>
@@ -366,7 +451,10 @@ select.sel:focus { border-color: var(--accent); }
   <!-- Main content -->
   <div class="main">
     <div class="topbar">
-      <h3 id="topbar-titulo">Dashboard</h3>
+      <div style="display:flex;align-items:center;gap:10px">
+        <button class="menu-btn" onclick="toggleSidebar(true)">☰</button>
+        <h3 id="topbar-titulo">Dashboard</h3>
+      </div>
       <div class="topbar-actions" id="topbar-actions"></div>
     </div>
     <div class="content" id="content"></div>
@@ -491,11 +579,13 @@ async function fazerLogin() {
 async function fazerRegistro() {
   const nome_empresa   = $('rg-empresa').value.trim();
   const nome_responsavel = $('rg-nome').value.trim();
+  const celular        = $('rg-celular').value.trim();
   const email          = $('rg-email').value.trim();
   const senha          = $('rg-senha').value;
   $('rg-erro').textContent = '';
 
   if (!nome_empresa || !email || !senha) { $('rg-erro').textContent = 'Preencha todos os campos'; return; }
+  if (!celular || celular.replace(/\D/g,'').length < 10) { $('rg-erro').textContent = 'Informe um celular válido com DDD'; return; }
   if (senha.length < 6) { $('rg-erro').textContent = 'Senha deve ter ao menos 6 caracteres'; return; }
 
   $('btn-reg').disabled = true;
@@ -504,7 +594,7 @@ async function fazerRegistro() {
     const dados = await fetch(API + '/api/auth/registro', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nome_empresa, nome_responsavel, email, senha })
+      body: JSON.stringify({ nome_empresa, nome_responsavel, celular, email, senha })
     });
     const res = await dados.json();
     if (!dados.ok) throw new Error(res.erro || 'Erro no cadastro');
@@ -516,6 +606,17 @@ async function fazerRegistro() {
     $('btn-reg').textContent = 'Criar conta grátis';
   }
 }
+
+// Máscara de telefone brasileiro
+document.addEventListener('input', function(e) {
+  if (e.target && e.target.id === 'rg-celular') {
+    let v = e.target.value.replace(/\D/g, '').slice(0, 11);
+    if (v.length > 6) v = v.replace(/(\d{2})(\d{1,5})(\d{0,4})/, '($1) $2-$3');
+    else if (v.length > 2) v = v.replace(/(\d{2})(\d{0,5})/, '($1) $2');
+    else if (v.length > 0) v = v.replace(/(\d{0,2})/, '($1');
+    e.target.value = v;
+  }
+});
 
 function iniciarSessao(dados) {
   SESSAO = { token: dados.token, usuario: dados.usuario, empresa: dados.empresa };
@@ -619,6 +720,17 @@ function irPara(modulo) {
   $('topbar-actions').innerHTML = '';
   $('content').innerHTML = '<div class="loading">Carregando…</div>';
   MODULOS[modulo].render();
+
+  // Fecha o drawer no mobile após navegar
+  toggleSidebar(false);
+}
+
+function toggleSidebar(abrir) {
+  const sb = $('sidebar');
+  const ov = $('sidebar-overlay');
+  if (!sb || !ov) return;
+  sb.classList.toggle('aberta', abrir);
+  ov.classList.toggle('visivel', abrir);
 }
 
 // ═══════════════════════════════════════════════════════════
