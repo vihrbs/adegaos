@@ -342,6 +342,50 @@ select.sel:focus { border-color: var(--accent); }
   .pdv-grid { grid-template-columns: repeat(2, 1fr); }
   table { min-width: 480px; }
 }
+
+/* ===========================================
+   TOUR GUIADO
+=========================================== */
+.tour-overlay {
+  position: fixed; inset: 0; z-index: 5000;
+  pointer-events: none;
+}
+.tour-highlight {
+  position: fixed; z-index: 5001;
+  border-radius: 10px;
+  box-shadow: 0 0 0 4000px rgba(0,0,0,.72);
+  transition: all .35s cubic-bezier(.4,0,.2,1);
+  pointer-events: none;
+}
+.tour-balao {
+  position: fixed; z-index: 5002;
+  background: var(--bg2); border: 1px solid var(--accent);
+  border-radius: 14px; padding: 20px 22px; width: 300px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.5);
+  transition: all .35s cubic-bezier(.4,0,.2,1);
+}
+.tour-balao::before {
+  content: ''; position: absolute;
+  width: 12px; height: 12px;
+  background: var(--bg2); border: 1px solid var(--accent);
+  transform: rotate(45deg);
+}
+.tour-balao.arrow-left::before { left: -7px; top: 20px; border-right: none; border-top: none; }
+.tour-balao.arrow-right::before { right: -7px; top: 20px; border-left: none; border-bottom: none; }
+.tour-balao.arrow-top::before { top: -7px; left: 20px; border-right: none; border-bottom: none; }
+.tour-balao.arrow-bottom::before { bottom: -7px; left: 20px; border-left: none; border-top: none; }
+.tour-passo { font-family: var(--mono, monospace); font-size: 11px; color: var(--accent); margin-bottom: 8px; letter-spacing: .05em; }
+.tour-titulo { font-weight: 700; font-size: 15px; margin-bottom: 8px; }
+.tour-desc { font-size: 13px; color: var(--text2); line-height: 1.6; margin-bottom: 18px; }
+.tour-btns { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.tour-btn-skip { font-size: 12px; color: var(--text2); background: none; border: none; cursor: pointer; padding: 4px; }
+.tour-btn-skip:hover { color: var(--text); }
+.tour-btn-prox { padding: 8px 18px; background: var(--accent); color: #000; border: none; border-radius: 7px; font-weight: 700; font-size: 13px; cursor: pointer; }
+.tour-btn-prox:hover { background: var(--accent2); }
+.tour-progresso { display: flex; gap: 4px; align-items: center; }
+.tour-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border); transition: background .2s; }
+.tour-dot.on { background: var(--accent); }
+
 </style>
 </head>
 <body>
@@ -624,6 +668,10 @@ function iniciarSessao(dados) {
   localStorage.setItem('bebidaos_usuario', JSON.stringify(dados.usuario));
   localStorage.setItem('bebidaos_empresa', JSON.stringify(dados.empresa));
   mostrarApp();
+  // Inicia tour apenas no primeiro login (novo cadastro)
+  if (!localStorage.getItem('bebidaos_tour_feito')) {
+    setTimeout(iniciarTour, 800);
+  }
 }
 
 function fazerLogout() {
@@ -2728,6 +2776,151 @@ async function carregarHistoricoCaixa() {
       </table></div>`;
 }
 
+
+// ═══════════════════════════════════════════════════════════
+// TOUR GUIADO
+// ═══════════════════════════════════════════════════════════
+const TOUR_PASSOS = [
+  {
+    titulo: 'Bem-vindo ao BebidaOS! 🍷',
+    desc: 'Vamos fazer um tour rápido pelo sistema. São só 8 passos e você já estará pronto pra usar. Pode pular quando quiser.',
+    seletor: null,
+    arrow: 'center'
+  },
+  {
+    titulo: 'Navegação principal',
+    desc: 'Aqui estão todos os módulos do sistema. No celular, toque no ☰ para abrir este menu.',
+    seletor: 'nav',
+    arrow: 'left'
+  },
+  {
+    titulo: 'Dashboard',
+    desc: 'Resumo do seu negócio: faturamento do dia, vendas do mês, alertas de estoque e crediário em aberto — tudo numa tela só.',
+    seletor: '#content',
+    arrow: 'top'
+  },
+  {
+    titulo: 'PDV / Caixa',
+    desc: 'Aqui você faz as vendas. Toque em um produto para adicionar ao carrinho, escolha a forma de pagamento e finalize. Funciona no celular atrás do balcão.',
+    seletor: '.nav-item:nth-child(2)',
+    arrow: 'left'
+  },
+  {
+    titulo: 'Estoque',
+    desc: 'Cadastre seus produtos com preço de custo e venda. O sistema baixa o estoque automaticamente a cada venda e te avisa quando estiver acabando.',
+    seletor: '.nav-item:nth-child(4)',
+    arrow: 'left'
+  },
+  {
+    titulo: 'Crediário (Fiado)',
+    desc: 'Registre vendas no fiado com ou sem parcelamento. O cliente paga parcial e o saldo atualiza na hora. Tudo lançado automático no financeiro.',
+    seletor: '.nav-item:nth-child(12)',
+    arrow: 'left'
+  },
+  {
+    titulo: 'Caixa',
+    desc: 'Abra o caixa no início do turno, registre sangrias e suprimentos, e feche no final. O sistema calcula o valor esperado e mostra se sobrou ou faltou.',
+    seletor: '.nav-item:nth-child(3)',
+    arrow: 'left'
+  },
+  {
+    titulo: 'Primeiro passo: cadastre um produto!',
+    desc: 'Vá em Estoque → clique em "+ Produto" → preencha nome, preço e estoque inicial. Depois ele já aparece no PDV pra você vender.',
+    seletor: '.nav-item:nth-child(4)',
+    arrow: 'left',
+    ultimo: true
+  }
+];
+
+let tourPasso = 0;
+
+function iniciarTour() {
+  tourPasso = 0;
+  $('tour-overlay').style.display = 'block';
+  renderizarPasso();
+}
+
+function encerrarTour() {
+  $('tour-overlay').style.display = 'none';
+  localStorage.setItem('bebidaos_tour_feito', '1');
+  $('tour-highlight').style.cssText = '';
+}
+
+function proximoPasso() {
+  if (tourPasso >= TOUR_PASSOS.length - 1) {
+    encerrarTour();
+    irPara('estoque');
+    return;
+  }
+  tourPasso++;
+  renderizarPasso();
+}
+
+function renderizarPasso() {
+  const passo = TOUR_PASSOS[tourPasso];
+  const total = TOUR_PASSOS.length;
+
+  $('tour-passo').textContent = 'PASSO ' + (tourPasso + 1) + ' DE ' + total;
+  $('tour-titulo').textContent = passo.titulo;
+  $('tour-desc').textContent = passo.desc;
+  $('tour-btn-prox').textContent = passo.ultimo ? 'Começar! 🚀' : 'Próximo →';
+
+  // Dots de progresso
+  $('tour-progresso').innerHTML = TOUR_PASSOS.map((_, i) =>
+    '<div class="tour-dot' + (i === tourPasso ? ' on' : '') + '"></div>'
+  ).join('');
+
+  const hl = $('tour-highlight');
+  const balao = $('tour-balao');
+
+  if (!passo.seletor) {
+    // Centralizado, sem highlight
+    hl.style.cssText = 'display:none';
+    balao.className = 'tour-balao';
+    balao.style.cssText = 'top:50%;left:50%;transform:translate(-50%,-50%)';
+    return;
+  }
+
+  // Destacar elemento
+  const el = document.querySelector(passo.seletor);
+  if (!el) { proximoPasso(); return; }
+
+  const rect = el.getBoundingClientRect();
+  const pad = 6;
+  hl.style.cssText = [
+    'display:block',
+    'left:' + (rect.left - pad) + 'px',
+    'top:' + (rect.top - pad) + 'px',
+    'width:' + (rect.width + pad * 2) + 'px',
+    'height:' + (rect.height + pad * 2) + 'px'
+  ].join(';');
+
+  // Posicionar balão
+  const bw = 300, bh = 200;
+  const margin = 18;
+  let top, left;
+  let arrow = passo.arrow || 'left';
+
+  if (arrow === 'left') {
+    left = rect.right + margin;
+    top = rect.top + rect.height / 2 - 60;
+    if (left + bw > window.innerWidth - 10) {
+      left = rect.left - bw - margin;
+      arrow = 'right';
+    }
+  } else if (arrow === 'top') {
+    top = rect.bottom + margin;
+    left = rect.left + rect.width / 2 - bw / 2;
+  }
+
+  // Evitar sair da tela
+  top = Math.max(10, Math.min(top, window.innerHeight - bh - 10));
+  left = Math.max(10, Math.min(left, window.innerWidth - bw - 10));
+
+  balao.className = 'tour-balao arrow-' + arrow;
+  balao.style.cssText = 'top:' + top + 'px;left:' + left + 'px';
+}
+
 // ═══════════════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════════════
@@ -2743,5 +2936,21 @@ document.addEventListener('keydown', e => {
 
 tentarRestaurarSessao();
 </script>
+
+<!-- TOUR GUIADO -->
+<div class="tour-overlay" id="tour-overlay" style="display:none">
+  <div class="tour-highlight" id="tour-highlight"></div>
+  <div class="tour-balao" id="tour-balao">
+    <div class="tour-passo" id="tour-passo"></div>
+    <div class="tour-titulo" id="tour-titulo"></div>
+    <div class="tour-desc" id="tour-desc"></div>
+    <div class="tour-btns">
+      <button class="tour-btn-skip" onclick="encerrarTour()">Pular tour</button>
+      <div class="tour-progresso" id="tour-progresso"></div>
+      <button class="tour-btn-prox" id="tour-btn-prox" onclick="proximoPasso()">Próximo →</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
