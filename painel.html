@@ -349,6 +349,7 @@ select.sel:focus { border-color: var(--accent); }
 .tour-overlay {
   position: fixed; inset: 0; z-index: 5000;
   pointer-events: none;
+  background: transparent;
 }
 .tour-highlight {
   position: fixed; z-index: 5001;
@@ -356,6 +357,7 @@ select.sel:focus { border-color: var(--accent); }
   box-shadow: 0 0 0 4000px rgba(0,0,0,.72);
   transition: all .35s cubic-bezier(.4,0,.2,1);
   pointer-events: none;
+  display: none;
 }
 .tour-balao {
   position: fixed; z-index: 5002;
@@ -363,6 +365,7 @@ select.sel:focus { border-color: var(--accent); }
   border-radius: 14px; padding: 20px 22px; width: 300px;
   box-shadow: 0 8px 32px rgba(0,0,0,.5);
   transition: all .35s cubic-bezier(.4,0,.2,1);
+  pointer-events: auto;
 }
 .tour-balao::before {
   content: ''; position: absolute;
@@ -2909,9 +2912,9 @@ function renderizarPasso() {
 
   if (!passo.seletor) {
     // Centralizado, sem highlight
-    hl.style.cssText = 'display:none';
+    hl.style.display = 'none';
     balao.className = 'tour-balao';
-    balao.style.cssText = 'top:50%;left:50%;transform:translate(-50%,-50%)';
+    balao.style.cssText = 'top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:auto';
     return;
   }
 
@@ -2921,13 +2924,11 @@ function renderizarPasso() {
 
   const rect = el.getBoundingClientRect();
   const pad = 6;
-  hl.style.cssText = [
-    'display:block',
-    'left:' + (rect.left - pad) + 'px',
-    'top:' + (rect.top - pad) + 'px',
-    'width:' + (rect.width + pad * 2) + 'px',
-    'height:' + (rect.height + pad * 2) + 'px'
-  ].join(';');
+  hl.style.display = 'block';
+  hl.style.left = (rect.left - pad) + 'px';
+  hl.style.top = (rect.top - pad) + 'px';
+  hl.style.width = (rect.width + pad * 2) + 'px';
+  hl.style.height = (rect.height + pad * 2) + 'px';
 
   // Posicionar balão
   const bw = 300, bh = 200;
