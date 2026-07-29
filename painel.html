@@ -564,6 +564,7 @@ const API = 'https://adegaos-production.up.railway.app';
 // ESTADO GLOBAL — apenas metadados de sessão, NUNCA dados de negócio
 // ═══════════════════════════════════════════════════════════
 let SESSAO = { token: null, usuario: null, empresa: null };
+let MODULOS_PERMITIDOS = []; // sempre vem do backend
 let MODULO_ATUAL = 'dashboard';
 
 // PDV: único estado local aceito (carrinho temporário)
@@ -701,6 +702,8 @@ document.addEventListener('input', function(e) {
 
 function iniciarSessao(dados) {
   SESSAO = { token: dados.token, usuario: dados.usuario, empresa: dados.empresa };
+  // Permissões sempre vêm do backend — nunca inventamos aqui
+  MODULOS_PERMITIDOS = dados.usuario?.modulos || [];
   localStorage.setItem('bebidaos_token', dados.token);
   localStorage.setItem('bebidaos_usuario', JSON.stringify(dados.usuario));
   localStorage.setItem('bebidaos_empresa', JSON.stringify(dados.empresa));
@@ -730,13 +733,26 @@ function irParaAssinatura() {
   irPara('configuracoes');
 }
 
-function tentarRestaurarSessao() {
+async function tentarRestaurarSessao() {
   const token   = localStorage.getItem('bebidaos_token');
   const usuario = localStorage.getItem('bebidaos_usuario');
   const empresa = localStorage.getItem('bebidaos_empresa');
-  if (token && usuario && empresa) {
-    SESSAO = { token, usuario: JSON.parse(usuario), empresa: JSON.parse(empresa) };
+  if (!token || !usuario || !empresa) return;
+
+  // Seta sessão provisória para que api() funcione
+  SESSAO = { token, usuario: JSON.parse(usuario), empresa: JSON.parse(empresa) };
+
+  try {
+    // Sempre busca permissões frescas do backend ao restaurar sessão
+    const me = await api('GET', '/api/auth/me');
+    if (!me) { fazerLogout(); return; }
+    SESSAO.usuario = me.usuario;
+    SESSAO.empresa = me.empresa || SESSAO.empresa;
+    MODULOS_PERMITIDOS = me.usuario?.modulos || [];
+    localStorage.setItem('bebidaos_usuario', JSON.stringify(me.usuario));
     mostrarApp();
+  } catch(e) {
+    fazerLogout();
   }
 }
 
@@ -744,8 +760,41 @@ function mostrarApp() {
   $('tela-login').style.display = 'none';
   $('app').classList.add('visivel');
   $('sb-empresa').textContent = SESSAO.empresa?.nome || '—';
+  aplicarPermissoes();
   renderizarTrialBanner();
-  irPara('dashboard');
+  // Redireciona para o primeiro módulo permitido
+  const primeiro = MODULOS_PERMITIDOS[0] || 'dashboard';
+  irPara(primeiro);
+}
+
+function aplicarPermissoes() {
+  const isAdmin = SESSAO.usuario?.role === 'admin';
+  // Mapeamento: módulo -> índice do nav-item (ordem da sidebar)
+  const navMap = {
+    dashboard:     0,
+    pdv:           1,
+    caixa:         2,
+    estoque:       3,
+    clientes:      4,
+    vendas:        5,
+    pedidos:       6,
+    financeiro:    7,
+    fornecedores:  8,
+    vendedores:    9,
+    relatorios:    10,
+    crediario:     11,
+    configuracoes: 12
+  };
+  const navItems = document.querySelectorAll('.nav-item');
+  navItems.forEach((btn, i) => {
+    const modulo = Object.keys(navMap)[i];
+    if (!modulo) return;
+    if (isAdmin) {
+      btn.style.display = '';
+    } else {
+      btn.style.display = MODULOS_PERMITIDOS.includes(modulo) ? '' : 'none';
+    }
+  });
 }
 
 function renderizarTrialBanner() {
@@ -793,6 +842,12 @@ const MODULOS = {
 
 function irPara(modulo) {
   if (!MODULOS[modulo]) return;
+  // Bloqueia acesso se não tiver permissão (operadores)
+  const isAdmin = SESSAO.usuario?.role === 'admin';
+  if (!isAdmin && MODULOS_PERMITIDOS.length > 0 && !MODULOS_PERMITIDOS.includes(modulo)) {
+    toast('Você não tem permissão para acessar este módulo', 'err');
+    return;
+  }
   MODULO_ATUAL = modulo;
 
   // Atualiza nav ativo
@@ -2224,7 +2279,11 @@ async function gerarRelatorioVendas() {
 async function renderConfiguracoes() {
   $('topbar-actions').innerHTML = '';
   try {
-    const status = await api('GET', '/api/pagamentos/status');
+    const isAdmin = SESSAO.usuario?.role === 'admin';
+    const [status, usuariosHtml] = await Promise.all([
+      api('GET', '/api/pagamentos/status'),
+      isAdmin ? renderUsuarios() : Promise.resolve('')
+    ]);
     if (!status) return;
 
     $('content').innerHTML = `
@@ -2263,6 +2322,8 @@ async function renderConfiguracoes() {
         </div>
 
       </div>
+
+      ${isAdmin ? `<div style="max-width:800px;margin-bottom:16px">${usuariosHtml}</div>` : ''}
 
       <div class="card mt16" style="max-width:800px">
         <div style="font-size:14px;font-weight:600;margin-bottom:16px">🏷️ Categorias de Produtos</div>
@@ -2814,6 +2875,168 @@ async function carregarHistoricoCaixa() {
 }
 
 
+
+// ═══════════════════════════════════════════════════════════
+// USUÁRIOS / PERMISSÕES
+// ═══════════════════════════════════════════════════════════
+const TODOS_MODULOS = [
+  { key: 'dashboard',     label: '📊 Dashboard' },
+  { key: 'pdv',           label: '💳 PDV' },
+  { key: 'caixa',         label: '🗄️ Caixa' },
+  { key: 'estoque',       label: '📦 Estoque' },
+  { key: 'clientes',      label: '👥 Clientes' },
+  { key: 'vendas',        label: '🧾 Vendas' },
+  { key: 'pedidos',       label: '🛵 Delivery' },
+  { key: 'financeiro',    label: '💰 Financeiro' },
+  { key: 'fornecedores',  label: '🏭 Fornecedores' },
+  { key: 'vendedores',    label: '🤝 Vendedores' },
+  { key: 'relatorios',    label: '📈 Relatórios' },
+  { key: 'crediario',     label: '📒 Crediário' }
+];
+
+async function renderUsuarios() {
+  // Só admin chega aqui (configuracoes já é restrito)
+  try {
+    const lista = await api('GET', '/api/usuarios');
+    if (!lista) return;
+
+    return `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <div style="font-size:14px;font-weight:600">👤 Usuários da Empresa</div>
+          <button class="btn btn-acento btn-sm" onclick="modalNovoUsuario()">+ Novo Operador</button>
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr>
+              <th>Nome</th><th>E-mail</th><th>Perfil</th><th>Módulos Liberados</th><th>Status</th><th></th>
+            </tr></thead>
+            <tbody>
+              ${lista.map(u => `
+                <tr>
+                  <td style="font-weight:500">${esc(u.nome)}</td>
+                  <td>${esc(u.email)}</td>
+                  <td><span class="badge ${u.role === 'admin' ? 'badge-blue' : 'badge-yellow'}">${u.role === 'admin' ? 'Admin' : 'Operador'}</span></td>
+                  <td style="font-size:12px;color:var(--text2)">
+                    ${u.role === 'admin' ? '<span style="color:var(--green)">Acesso total</span>' : u.modulos.length === 0 ? '<span style="color:var(--red)">Nenhum</span>' : u.modulos.length + ' módulo(s)'}
+                  </td>
+                  <td><span class="badge ${u.ativo ? 'badge-green' : 'badge-red'}">${u.ativo ? 'Ativo' : 'Inativo'}</span></td>
+                  <td>
+                    ${u.role !== 'admin' ? `<button class="btn btn-ghost btn-sm" onclick="modalEditarUsuario('${u.id}','${esc(u.nome)}',${JSON.stringify(u.modulos)},${u.ativo})">✏️</button>` : ''}
+                  </td>
+                </tr>
+              `).join('') || '<tr><td colspan="6" class="empty">Nenhum usuário</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  } catch(e) {
+    return '<div class="empty">Erro ao carregar usuários</div>';
+  }
+}
+
+function checkboxesModulos(selecionados) {
+  return TODOS_MODULOS.map(m => `
+    <label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;font-size:13px">
+      <input type="checkbox" value="${m.key}" ${selecionados.includes(m.key) ? 'checked' : ''}
+        style="width:16px;height:16px;accent-color:var(--accent)">
+      ${m.label}
+    </label>
+  `).join('');
+}
+
+function getModulosSelecionados() {
+  return [...document.querySelectorAll('#modal-body input[type=checkbox]:checked')].map(c => c.value);
+}
+
+function modalNovoUsuario() {
+  abrirModal('Novo Operador', `
+    <div class="fg"><label>Nome*</label><input id="nu-nome" placeholder="Nome do operador"></div>
+    <div class="fg mt10"><label>E-mail*</label><input type="email" id="nu-email" placeholder="operador@email.com"></div>
+    <div class="fg mt10"><label>Senha* (mín. 6 caracteres)</label><input type="password" id="nu-senha" placeholder="••••••"></div>
+    <div style="margin-top:14px;font-size:13px;font-weight:600;margin-bottom:8px">Módulos que pode acessar:</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 16px">
+      ${checkboxesModulos(['dashboard','pdv','estoque'])}
+    </div>
+  `, `
+    <button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button>
+    <button class="btn btn-acento" onclick="salvarNovoUsuario()">Criar Operador</button>
+  `);
+}
+
+async function salvarNovoUsuario() {
+  const nome  = $('nu-nome').value.trim();
+  const email = $('nu-email').value.trim();
+  const senha = $('nu-senha').value;
+  const modulos = getModulosSelecionados();
+
+  if (!nome || !email || !senha) { toast('Preencha todos os campos', 'err'); return; }
+  if (senha.length < 6) { toast('Senha deve ter ao menos 6 caracteres', 'err'); return; }
+
+  try {
+    await api('POST', '/api/usuarios', { nome, email, senha, modulos });
+    toast('Operador criado!');
+    fecharModal();
+    irPara('configuracoes');
+  } catch(e) {
+    toast(e.message, 'err');
+  }
+}
+
+function modalEditarUsuario(id, nome, modulos, ativo) {
+  abrirModal('Editar Operador', `
+    <div class="fg"><label>Nome</label><input id="eu-nome" value="${esc(nome)}"></div>
+    <div class="fg mt10"><label>Nova senha (deixe em branco para não alterar)</label><input type="password" id="eu-senha" placeholder="••••••"></div>
+    <div class="fg mt10"><label>Status</label>
+      <select id="eu-ativo">
+        <option value="true" ${ativo ? 'selected' : ''}>Ativo</option>
+        <option value="false" ${!ativo ? 'selected' : ''}>Inativo</option>
+      </select>
+    </div>
+    <div style="margin-top:14px;font-size:13px;font-weight:600;margin-bottom:8px">Módulos que pode acessar:</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 16px">
+      ${checkboxesModulos(modulos)}
+    </div>
+  `, `
+    <button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button>
+    <button class="btn btn-vermelho btn-sm" onclick="desativarUsuario('${id}')">Desativar</button>
+    <button class="btn btn-acento" onclick="salvarEdicaoUsuario('${id}')">Salvar</button>
+  `);
+}
+
+async function salvarEdicaoUsuario(id) {
+  const nome   = $('eu-nome').value.trim();
+  const senha  = $('eu-senha').value;
+  const ativo  = $('eu-ativo').value === 'true';
+  const modulos = getModulosSelecionados();
+
+  const payload = { nome, modulos, ativo };
+  if (senha && senha.length >= 6) payload.senha = senha;
+  else if (senha && senha.length > 0) { toast('Senha deve ter ao menos 6 caracteres', 'err'); return; }
+
+  try {
+    await api('PUT', '/api/usuarios/' + id, payload);
+    toast('Operador atualizado!');
+    fecharModal();
+    irPara('configuracoes');
+  } catch(e) {
+    toast(e.message, 'err');
+  }
+}
+
+async function desativarUsuario(id) {
+  if (!confirm('Desativar este operador? Ele não conseguirá mais fazer login.')) return;
+  try {
+    await api('DELETE', '/api/usuarios/' + id);
+    toast('Operador desativado');
+    fecharModal();
+    irPara('configuracoes');
+  } catch(e) {
+    toast(e.message, 'err');
+  }
+}
+
 // ═══════════════════════════════════════════════════════════
 // TOUR GUIADO
 // ═══════════════════════════════════════════════════════════
@@ -3005,6 +3228,104 @@ tentarRestaurarSessao();
   </svg>
 </a>
 
-   
+
+<!-- PWA: Service Worker + Banner de instalação -->
+
+<!-- Banner iOS (Safari) -->
+<div id="pwa-ios-banner" style="display:none;position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:9980;background:var(--bg2);border:1px solid var(--accent);border-radius:14px;padding:16px 18px;box-shadow:0 8px 32px rgba(0,0,0,.5);max-width:320px;width:90%;text-align:center">
+  <div style="font-size:28px;margin-bottom:8px">🍷</div>
+  <div style="font-weight:700;font-size:14px;margin-bottom:6px">Instale o BebidaOS no seu iPhone</div>
+  <div style="font-size:12px;color:var(--text2);line-height:1.6;margin-bottom:12px">
+    Toque em <strong style="color:var(--text)">
+    <svg style="vertical-align:middle;margin:0 2px" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+    Compartilhar</strong> e depois em <strong style="color:var(--text)">"Adicionar à Tela de Início"</strong> para instalar como app.
+  </div>
+  <div style="background:var(--bg3);border-radius:8px;padding:8px;font-size:11px;color:var(--text2);margin-bottom:12px">
+    📱 Funciona como app nativo, sem precisar abrir o navegador
+  </div>
+  <button onclick="fecharBannerIOS()" style="padding:7px 18px;background:var(--accent);color:#000;border:none;border-radius:7px;font-weight:700;font-size:13px;cursor:pointer">Entendi!</button>
+</div>
+<div id="pwa-banner" style="display:none;position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:9980;background:var(--bg2);border:1px solid var(--accent);border-radius:14px;padding:14px 18px;display:none;align-items:center;gap:14px;box-shadow:0 8px 32px rgba(0,0,0,.5);max-width:340px;width:90%">
+  <span style="font-size:28px">🍷</span>
+  <div style="flex:1">
+    <div style="font-weight:600;font-size:14px">Instalar BebidaOS</div>
+    <div style="font-size:12px;color:var(--text2)">Adicione na tela inicial do seu celular</div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <button onclick="instalarPWA()" style="padding:6px 14px;background:var(--accent);color:#000;border:none;border-radius:7px;font-weight:700;font-size:12px;cursor:pointer">Instalar</button>
+    <button onclick="fecharBannerPWA()" style="padding:4px;background:none;border:none;color:var(--text2);font-size:11px;cursor:pointer">Agora não</button>
+  </div>
+</div>
+
+<script>
+
+// Detecta iOS e mostra instrução específica
+function isIOS() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+}
+function isInStandaloneMode() {
+  return ('standalone' in window.navigator) && window.navigator.standalone;
+}
+
+function fecharBannerIOS() {
+  document.getElementById('pwa-ios-banner').style.display = 'none';
+  localStorage.setItem('bebidaos_pwa_dispensado', '1');
+}
+
+// Mostra banner iOS se for iPhone/iPad e ainda não instalou
+if (isIOS() && !isInStandaloneMode() && !localStorage.getItem('bebidaos_pwa_dispensado')) {
+  setTimeout(() => {
+    const banner = document.getElementById('pwa-ios-banner');
+    if (banner) banner.style.display = 'block';
+  }, 3000);
+}
+
+// Service Worker
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then(reg => console.log('SW registrado:', reg.scope))
+      .catch(err => console.log('SW erro:', err));
+  });
+}
+
+// Banner de instalação PWA
+let deferredPrompt = null;
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  // Mostra banner apenas se não foi dispensado antes
+  if (!localStorage.getItem('bebidaos_pwa_dispensado')) {
+    const banner = document.getElementById('pwa-banner');
+    if (banner) {
+      banner.style.display = 'flex';
+      setTimeout(() => banner.style.display = 'none', 15000); // Some após 15s
+    }
+  }
+});
+
+async function instalarPWA() {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  const { outcome } = await deferredPrompt.userChoice;
+  deferredPrompt = null;
+  document.getElementById('pwa-banner').style.display = 'none';
+  if (outcome === 'accepted') {
+    console.log('PWA instalado!');
+  }
+}
+
+function fecharBannerPWA() {
+  document.getElementById('pwa-banner').style.display = 'none';
+  localStorage.setItem('bebidaos_pwa_dispensado', '1');
+}
+
+// Detecta se já está instalado como PWA
+window.addEventListener('appinstalled', () => {
+  document.getElementById('pwa-banner').style.display = 'none';
+  console.log('PWA instalado com sucesso');
+});
+</script>
 </body>
 </html>
