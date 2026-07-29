@@ -5,6 +5,21 @@ const { v4: uuid } = require('uuid');
 const supabase = require('../utils/supabase');
 const auth = require('../middleware/auth');
 
+
+// Busca permissões do usuário
+async function buscarPermissoes(usuario_id, empresa_id, role) {
+  if (role === 'admin') {
+    return ['dashboard','pdv','caixa','estoque','clientes','vendas','pedidos',
+            'financeiro','fornecedores','vendedores','relatorios','crediario','configuracoes'];
+  }
+  const { data } = await supabase
+    .from('usuario_permissoes')
+    .select('modulos')
+    .eq('usuario_id', usuario_id)
+    .maybeSingle();
+  return data?.modulos || ['dashboard','pdv','estoque'];
+}
+
 function gerarToken(empresa_id, usuario_id) {
   return jwt.sign(
     { empresa_id, usuario_id },
@@ -137,9 +152,11 @@ router.post('/login', async (req, res) => {
 
     const token = gerarToken(empresa.id, usuario.id);
 
+    const modulos = await buscarPermissoes(usuario.id, empresa.id, usuario.role);
+
     res.json({
       token,
-      usuario: { id: usuario.id, nome: usuario.nome, email: usuario.email, role: usuario.role },
+      usuario: { id: usuario.id, nome: usuario.nome, email: usuario.email, role: usuario.role, modulos },
       empresa: { id: empresa.id, nome: empresa.nome, trial_expira_em: empresa.trial_expira_em, plano_ativo: empresa.plano_ativo }
     });
   } catch (err) {
@@ -157,7 +174,8 @@ router.get('/me', auth, async (req, res) => {
       .eq('id', req.usuario_id)
       .single();
 
-    res.json({ usuario, empresa: req.empresa });
+    const modulos = await buscarPermissoes(usuario.id, req.empresa_id, usuario.role);
+    res.json({ usuario: { ...usuario, modulos }, empresa: req.empresa });
   } catch (err) {
     res.status(500).json({ erro: 'Erro interno' });
   }
