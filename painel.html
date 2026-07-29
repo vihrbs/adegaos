@@ -351,20 +351,25 @@ select.sel:focus { border-color: var(--accent); }
   pointer-events: none;
   background: transparent;
 }
+.tour-escuro {
+  position: fixed; inset: 0; z-index: 5001;
+  background: rgba(0,0,0,.72);
+  pointer-events: auto;
+}
 .tour-highlight {
-  position: fixed; z-index: 5001;
+  position: fixed; z-index: 5002;
   border-radius: 10px;
-  box-shadow: 0 0 0 4000px rgba(0,0,0,.72);
-  transition: all .35s cubic-bezier(.4,0,.2,1);
+  background: transparent;
+  outline: 3px solid rgba(200,151,58,.7);
+  box-shadow: 0 0 0 3px rgba(200,151,58,.2);
   pointer-events: none;
   display: none;
 }
 .tour-balao {
-  position: fixed; z-index: 5002;
+  position: fixed; z-index: 5003;
   background: var(--bg2); border: 1px solid var(--accent);
   border-radius: 14px; padding: 20px 22px; width: 300px;
   box-shadow: 0 8px 32px rgba(0,0,0,.5);
-  transition: all .35s cubic-bezier(.4,0,.2,1);
   pointer-events: auto;
 }
 .tour-balao::before {
@@ -3097,13 +3102,14 @@ let tourPasso = 0;
 function iniciarTour() {
   tourPasso = 0;
   $('tour-overlay').style.display = 'block';
+  $('tour-escuro').style.display = 'block';
   renderizarPasso();
 }
 
 function encerrarTour() {
   $('tour-overlay').style.display = 'none';
   localStorage.setItem('bebidaos_tour_feito', '1');
-  $('tour-highlight').style.cssText = '';
+  $('tour-highlight').style.display = 'none';
 }
 
 function proximoPasso() {
@@ -3134,23 +3140,23 @@ function renderizarPasso() {
   const balao = $('tour-balao');
 
   if (!passo.seletor) {
-    // Centralizado, sem highlight
     hl.style.display = 'none';
     balao.className = 'tour-balao';
-    balao.style.cssText = 'top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:auto';
+    balao.style.top = '50%';
+    balao.style.left = '50%';
+    balao.style.transform = 'translate(-50%,-50%)';
     return;
   }
 
-  // Destacar elemento
   const el = document.querySelector(passo.seletor);
   if (!el) { proximoPasso(); return; }
 
   const rect = el.getBoundingClientRect();
   const pad = 6;
   hl.style.display = 'block';
-  hl.style.left = (rect.left - pad) + 'px';
-  hl.style.top = (rect.top - pad) + 'px';
-  hl.style.width = (rect.width + pad * 2) + 'px';
+  hl.style.left   = (rect.left   - pad) + 'px';
+  hl.style.top    = (rect.top    - pad) + 'px';
+  hl.style.width  = (rect.width  + pad * 2) + 'px';
   hl.style.height = (rect.height + pad * 2) + 'px';
 
   // Posicionar balão
@@ -3197,6 +3203,7 @@ tentarRestaurarSessao();
 
 <!-- TOUR GUIADO -->
 <div class="tour-overlay" id="tour-overlay" style="display:none">
+  <div class="tour-escuro" id="tour-escuro" onclick="encerrarTour()"></div>
   <div class="tour-highlight" id="tour-highlight"></div>
   <div class="tour-balao" id="tour-balao">
     <div class="tour-passo" id="tour-passo"></div>
