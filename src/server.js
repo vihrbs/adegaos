@@ -19,6 +19,9 @@ app.use(express.urlencoded({ extended: true }));
 // ── CORS ──────────────────────────────────────────────────────
 const allowedOrigins = [
   process.env.FRONTEND_URL,
+  'https://bebidaos.com.br',
+  'https://www.bebidaos.com.br',
+  'https://vihrbs.github.io',
   'http://localhost:5500',
   'http://127.0.0.1:5500',
   'http://localhost:3000'
@@ -60,6 +63,7 @@ app.use('/api/relatorios',  require('./routes/relatorios'));
 app.use('/api/pagamentos',  require('./routes/pagamentos'));
 app.use('/api/dashboard',   require('./routes/dashboard'));
 app.use('/api/crediario',   require('./routes/crediario'));
+app.use('/api/usuarios',    require('./routes/usuarios'));
 app.use('/api/caixa',       require('./routes/caixa'));
 
 // ── Health check ──────────────────────────────────────────────
