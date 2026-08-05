@@ -4,6 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>BebidaOS — Gestão de Adega</title>
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#c8973a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BebidaOS">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="./icon-512.png">
 <style>
 /* ═══════════════════════════════════════
    TOKENS — cor, tipografia, espaçamento
@@ -2927,7 +2936,7 @@ async function renderUsuarios() {
                   </td>
                   <td><span class="badge ${u.ativo ? 'badge-green' : 'badge-red'}">${u.ativo ? 'Ativo' : 'Inativo'}</span></td>
                   <td>
-                    ${u.role !== 'admin' ? `<button class="btn btn-ghost btn-sm" onclick="modalEditarUsuario('${u.id}','${esc(u.nome)}',${JSON.stringify(u.modulos)},${u.ativo})">✏️</button>` : ''}
+                    ${u.role !== 'admin' ? `<button class="btn btn-ghost btn-sm" onclick="abrirEdicaoUsuario('${u.id}')">✏️</button>` : ''}
                   </td>
                 </tr>
               `).join('') || '<tr><td colspan="6" class="empty">Nenhum usuário</td></tr>'}
@@ -2989,25 +2998,39 @@ async function salvarNovoUsuario() {
   }
 }
 
+async function abrirEdicaoUsuario(id) {
+  // Busca dados frescos do backend — evita problema de JSON no onclick
+  try {
+    const lista = await api('GET', '/api/usuarios');
+    if (!lista) return;
+    const u = lista.find(x => x.id === id);
+    if (!u) { toast('Usuário não encontrado', 'err'); return; }
+
+    abrirModal('Editar Operador', `
+      <div class="fg"><label>Nome</label><input id="eu-nome" value="${esc(u.nome)}"></div>
+      <div class="fg mt10"><label>Nova senha (deixe em branco para não alterar)</label><input type="password" id="eu-senha" placeholder="••••••"></div>
+      <div class="fg mt10"><label>Status</label>
+        <select id="eu-ativo">
+          <option value="true" ${u.ativo ? 'selected' : ''}>Ativo</option>
+          <option value="false" ${!u.ativo ? 'selected' : ''}>Inativo</option>
+        </select>
+      </div>
+      <div style="margin-top:14px;font-size:13px;font-weight:600;margin-bottom:8px">Módulos que pode acessar:</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 16px">
+        ${checkboxesModulos(u.modulos || [])}
+      </div>
+    `, `
+      <button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button>
+      <button class="btn btn-vermelho btn-sm" onclick="desativarUsuario('${u.id}')">Desativar</button>
+      <button class="btn btn-acento" onclick="salvarEdicaoUsuario('${u.id}')">Salvar</button>
+    `);
+  } catch(e) {
+    toast('Erro ao carregar usuário: ' + e.message, 'err');
+  }
+}
+
 function modalEditarUsuario(id, nome, modulos, ativo) {
-  abrirModal('Editar Operador', `
-    <div class="fg"><label>Nome</label><input id="eu-nome" value="${esc(nome)}"></div>
-    <div class="fg mt10"><label>Nova senha (deixe em branco para não alterar)</label><input type="password" id="eu-senha" placeholder="••••••"></div>
-    <div class="fg mt10"><label>Status</label>
-      <select id="eu-ativo">
-        <option value="true" ${ativo ? 'selected' : ''}>Ativo</option>
-        <option value="false" ${!ativo ? 'selected' : ''}>Inativo</option>
-      </select>
-    </div>
-    <div style="margin-top:14px;font-size:13px;font-weight:600;margin-bottom:8px">Módulos que pode acessar:</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 16px">
-      ${checkboxesModulos(modulos)}
-    </div>
-  `, `
-    <button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button>
-    <button class="btn btn-vermelho btn-sm" onclick="desativarUsuario('${id}')">Desativar</button>
-    <button class="btn btn-acento" onclick="salvarEdicaoUsuario('${id}')">Salvar</button>
-  `);
+  abrirEdicaoUsuario(id);
 }
 
 async function salvarEdicaoUsuario(id) {
@@ -3290,7 +3313,7 @@ if (isIOS() && !isInStandaloneMode() && !localStorage.getItem('bebidaos_pwa_disp
 // Service Worker
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
+    navigator.serviceWorker.register('./sw.js')
       .then(reg => console.log('SW registrado:', reg.scope))
       .catch(err => console.log('SW erro:', err));
   });
